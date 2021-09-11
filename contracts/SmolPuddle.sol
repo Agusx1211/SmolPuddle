@@ -7,7 +7,6 @@ import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 
 enum Status {
   Open,
@@ -21,7 +20,6 @@ interface WETH is IERC20 {
 
 contract SmolPuddle is ReentrancyGuard, Pausable {
   using SafeERC20 for IERC20;
-  using SafeMath for uint256;
 
   mapping(address => mapping(bytes32 => Status)) public status;
   WETH public immutable weth;
@@ -125,7 +123,7 @@ contract SmolPuddle is ReentrancyGuard, Pausable {
 
     // Transfer to fee recipients
     for (uint256 i = 0; i < feeRecipientsSize; i++) {
-      sellerAmount = sellerAmount.sub(_order.feeAmounts[i]);
+      sellerAmount -= _order.feeAmounts[i];
       _order.payment.safeTransferFrom(from, _order.feeRecipients[i], _order.feeAmounts[i]);
     }
 
