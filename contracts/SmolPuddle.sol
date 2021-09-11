@@ -86,48 +86,56 @@ contract SmolPuddle is ReentrancyGuard, Pausable {
       revert OrderExpired();
     }
 
-    // Compute order hash
-    bytes32 orderHash = keccak256(
-      abi.encode(
+    // All ETH payments are WETH payments
+    // signature must be on WETH, but buyer can pay in ETH if payment == 0
+    IERC20 payment = address(_payment) == address(0) ? weth : _payment;
+
+    // Scope orderHash due to stack limits
+
+    {
+      // Compute order hash
+      bytes32 orderHash = keccak256(
+        abi.encode(
+          _nft,
+          _tokenId,
+          payment,
+          _amount,
+          _seller,
+          _expiration,
+          _salt,
+          _feeRecipients,
+          _feeAmounts
+        )
+      );
+
+      // Emit events
+      emit OrderExecutedP1(
+        orderHash,
+        _seller,
+        msg.sender
+      );
+
+      emit OrderExecutedP2(
         _nft,
         _tokenId,
         _payment,
         _amount,
-        _seller,
-        _expiration,
-        _salt,
         _feeRecipients,
         _feeAmounts
-      )
-    );
+      );
 
-    // Emit events
-    emit OrderExecutedP1(
-      orderHash,
-      _seller,
-      msg.sender
-    );
+      // Check if order is canceled or executed
+      if (status[_seller][orderHash] != Status.Open) {
+        revert OrderNotOpen();
+      }
 
-    emit OrderExecutedP2(
-      _nft,
-      _tokenId,
-      _payment,
-      _amount,
-      _feeRecipients,
-      _feeAmounts
-    );
+      // Switch order status to executed
+      status[_seller][orderHash] = Status.Executed;
 
-    // Check if order is canceled or executed
-    if (status[_seller][orderHash] != Status.Open) {
-      revert OrderNotOpen();
-    }
-
-    // Switch order status to executed
-    status[_seller][orderHash] = Status.Executed;
-
-    // Check user signature
-    if (!SignatureChecker.isValidSignatureNow(_seller, orderHash, _signature)) {
-      revert InalidSignature();
+      // Check user signature
+      if (!SignatureChecker.isValidSignatureNow(_seller, orderHash, _signature)) {
+        revert InalidSignature();
+      }
     }
 
     // Transfer ERC721 Token
@@ -135,13 +143,14 @@ contract SmolPuddle is ReentrancyGuard, Pausable {
 
     // Wrap ETH into WETH if no token is defined
     // use WETH so recipients can't do weird things when they receive the payments
-    (IERC20 payment, address from) = address(_payment) == address(0) ? (_payment, msg.sender) : (weth, address(this));
-    if (payment == weth) {
+    address from = msg.sender;
+    if (payment == _payment) {
       if (msg.value != _amount) {
         revert NotEnoughETH();
       }
 
       weth.deposit{ value: msg.value }();
+      from = address(this);
     }
 
     // Seller receives amount - fees
