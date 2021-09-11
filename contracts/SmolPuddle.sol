@@ -8,6 +8,11 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
+enum Status {
+  Open,
+  Executed,
+  Canceled
+}
 
 interface WETH is IERC20 {
   function deposit() external payable;
@@ -16,7 +21,7 @@ interface WETH is IERC20 {
 contract SmolPuddle is ReentrancyGuard, Pausable {
   using SafeERC20 for IERC20;
 
-  mapping(address => mapping(bytes32 => bool)) public canceled;
+  mapping(address => mapping(bytes32 => Status)) public status;
   WETH public immutable weth;
 
   constructor(WETH _weth) {
@@ -25,12 +30,16 @@ contract SmolPuddle is ReentrancyGuard, Pausable {
 
   error OrderExpired();
   error InalidSignature();
-  error OrderCanceled();
   error NotEnoughETH();
   error InvalidArrays();
+  error OrderNotOpen();
 
   function cancel(bytes32 _hash) external {
-    canceled[msg.sender][_hash] = true;
+    if (status[msg.sender][_hash] != Status.Open) {
+      revert OrderNotOpen();
+    }
+
+    status[msg.sender][_hash] = Status.Canceled;
   }
 
   function swap(
@@ -71,10 +80,13 @@ contract SmolPuddle is ReentrancyGuard, Pausable {
       )
     );
 
-    // Check if order is canceled
-    if (canceled[_seller][orderHash]) {
-      revert OrderCanceled();
+    // Check if order is canceled or executed
+    if (status[_seller][orderHash] != Status.Open) {
+      revert OrderNotOpen();
     }
+
+    // Switch order status to executed
+    status[_seller][orderHash] = Status.Executed;
 
     // Check user signature
     if (!SignatureChecker.isValidSignatureNow(_seller, orderHash, _signature)) {
