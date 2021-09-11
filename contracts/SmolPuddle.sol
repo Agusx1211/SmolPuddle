@@ -41,10 +41,10 @@ contract SmolPuddle is ReentrancyGuard, Pausable {
     address _seller,
     uint256 _expiration,
     bytes32 _salt,
-    address[] calldata _feeRecipients,
-    uint256[] calldata _feeAmounts,
-    bytes calldata _signature
-  ) external payable nonReentrant whenNotPaused returns (bool) {
+    address[] memory _feeRecipients,
+    uint256[] memory _feeAmounts,
+    bytes memory _signature
+  ) public payable nonReentrant whenNotPaused returns (bool) {
     // Sanity check inputs
     uint256 feeRecipientsSize = _feeRecipients.length;
     if (feeRecipientsSize != _feeAmounts.length) {
