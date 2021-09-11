@@ -28,6 +28,7 @@ contract SmolPuddle is ReentrancyGuard, Pausable {
     weth = _weth;
   }
 
+  // Two events so we can have more indexed fields
   event OrderExecutedP1(
     bytes32 indexed _order,
     address indexed _seller,
@@ -37,7 +38,7 @@ contract SmolPuddle is ReentrancyGuard, Pausable {
   event OrderExecutedP2(
     IERC721 indexed _token,
     uint256 indexed _id,
-    IERC20 _payment,
+    IERC20 indexed _payment,
     uint256 _amount,
     address[] _feeRecipients,
     uint256[] _feeAmounts
@@ -48,11 +49,25 @@ contract SmolPuddle is ReentrancyGuard, Pausable {
     address indexed _seller
   );
 
+  struct Order {
+    IERC721 nft;
+    uint256 tokenId;
+    IERC20 payment;
+    uint256 amount;
+    address seller;
+    uint256 expiration;
+    bytes32 salt;
+    address[] feeRecipients;
+    uint256[] feeAmounts;
+    bytes signature;
+  }
+
   error OrderExpired();
   error InalidSignature();
   error NotEnoughETH();
   error InvalidArrays();
   error OrderNotOpen();
+  error InvalidPayment();
 
   function cancel(bytes32 _hash) external {
     if (status[msg.sender][_hash] != Status.Open) {
@@ -63,108 +78,68 @@ contract SmolPuddle is ReentrancyGuard, Pausable {
     emit OrderCanceled(_hash, msg.sender);
   }
 
-  function swap(
-    IERC721 _nft,
-    uint256 _tokenId,
-    IERC20 _payment,
-    uint256 _amount,
-    address _seller,
-    uint256 _expiration,
-    bytes32 _salt,
-    address[] memory _feeRecipients,
-    uint256[] memory _feeAmounts,
-    bytes memory _signature
-  ) public payable nonReentrant whenNotPaused returns (bool) {
+  function swap(Order memory _order) public payable nonReentrant whenNotPaused returns (bool) {
     // Sanity check inputs
-    uint256 feeRecipientsSize = _feeRecipients.length;
-    if (feeRecipientsSize != _feeAmounts.length) {
+    uint256 feeRecipientsSize = _order.feeRecipients.length;
+    if (feeRecipientsSize != _order.feeAmounts.length) {
       revert InvalidArrays();
     }
 
     // Must not be expired
-    if (block.timestamp > _expiration) {
+    if (block.timestamp > _order.expiration) {
       revert OrderExpired();
     }
 
-    // All ETH payments are WETH payments
-    // signature must be on WETH, but buyer can pay in ETH if payment == 0
-    IERC20 payment = address(_payment) == address(0) ? weth : _payment;
+    // Compute order hash
+    bytes32 orderHash = keccak256(abi.encode(_order));
 
-    // Scope orderHash due to stack limits
-
-    {
-      // Compute order hash
-      bytes32 orderHash = keccak256(
-        abi.encode(
-          _nft,
-          _tokenId,
-          payment,
-          _amount,
-          _seller,
-          _expiration,
-          _salt,
-          _feeRecipients,
-          _feeAmounts
-        )
-      );
-
-      // Emit events
-      emit OrderExecutedP1(
-        orderHash,
-        _seller,
-        msg.sender
-      );
-
-      emit OrderExecutedP2(
-        _nft,
-        _tokenId,
-        _payment,
-        _amount,
-        _feeRecipients,
-        _feeAmounts
-      );
-
-      // Check if order is canceled or executed
-      if (status[_seller][orderHash] != Status.Open) {
-        revert OrderNotOpen();
-      }
-
-      // Switch order status to executed
-      status[_seller][orderHash] = Status.Executed;
-
-      // Check user signature
-      if (!SignatureChecker.isValidSignatureNow(_seller, orderHash, _signature)) {
-        revert InalidSignature();
-      }
+    // Check user signature
+    if (!SignatureChecker.isValidSignatureNow(_order.seller, orderHash, _order.signature)) {
+      revert InalidSignature();
     }
 
+    // Check if order is canceled or executed
+    if (status[_order.seller][orderHash] != Status.Open) {
+      revert OrderNotOpen();
+    }
+
+    // Switch order status to executed
+    status[_order.seller][orderHash] = Status.Executed;
+
     // Transfer ERC721 Token
-    _nft.transferFrom(_seller, msg.sender, _tokenId);
+    _order.nft.transferFrom(_order.seller, msg.sender, _order.tokenId);
 
-    // Wrap ETH into WETH if no token is defined
-    // use WETH so recipients can't do weird things when they receive the payments
+    // If user sends ETH, then ETH will be converted to WETH.
     address from = msg.sender;
-    if (payment == _payment) {
-      if (msg.value != _amount) {
-        revert NotEnoughETH();
-      }
-
-      weth.deposit{ value: msg.value }();
+    if (_order.payment == weth && msg.value > 0) {
+      weth.deposit{ value: _order.amount }();
       from = address(this);
+    } else if (msg.value > 0) {
+      revert InvalidPayment();
     }
 
     // Seller receives amount - fees
-    uint256 sellerAmount = _amount;
+    uint256 sellerAmount = _order.amount;
 
     // Transfer to fee recipients
     for (uint256 i = 0; i < feeRecipientsSize; i++) {
-      uint256 amount = _feeAmounts[i];
-      sellerAmount -= amount;
-      payment.safeTransferFrom(from, _feeRecipients[i], amount);
+      sellerAmount -= _order.feeAmounts[i];
+      _order.payment.safeTransferFrom(from, _order.feeRecipients[i], _order.feeAmounts[i]);
     }
 
     // Transfer payments
-    payment.safeTransferFrom(from, _seller, sellerAmount);
+    _order.payment.safeTransferFrom(from, _order.seller, sellerAmount);
+
+    // Emit events
+    emit OrderExecutedP1(orderHash, _order.seller, msg.sender);
+    emit OrderExecutedP2(
+      _order.nft,
+      _order.tokenId,
+      _order.payment,
+      _order.amount,
+      _order.feeRecipients,
+      _order.feeAmounts
+    );
 
     // All done!
     return true;
