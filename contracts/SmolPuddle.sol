@@ -1,13 +1,10 @@
 //SPDX-License-Identifier: Unlicense
 pragma solidity ^0.8.4;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 
 enum Status {
   Open,
@@ -15,13 +12,16 @@ enum Status {
   Canceled
 }
 
-interface WETH is IERC20 {
+interface ERC20_ERC721 {
+  function transferFrom(address from, address to, uint256 idOrAmount) external;
+}
+
+interface WETH is ERC20_ERC721 {
   function deposit() external payable;
 }
 
 contract SmolPuddle is ReentrancyGuard, Pausable {
-  using SafeERC20 for IERC20;
-  using SafeMath for uint256;
+  using SafeERC20 for ERC20_ERC721;
 
   mapping(address => mapping(bytes32 => Status)) public status;
   WETH public immutable weth;
@@ -30,7 +30,7 @@ contract SmolPuddle is ReentrancyGuard, Pausable {
     weth = _weth;
   }
 
-  // Two events so we can have more indexed fields
+  // Three events so we can have more indexed fields
   event OrderExecutedP1(
     bytes32 indexed _order,
     address indexed _seller,
@@ -38,10 +38,13 @@ contract SmolPuddle is ReentrancyGuard, Pausable {
   );
 
   event OrderExecutedP2(
-    IERC721 indexed _token,
-    uint256 indexed _id,
-    IERC20 indexed _payment,
-    uint256 _amount,
+    ERC20_ERC721 indexed _buyToken,
+    uint256 indexed _buyTokenIdOrAmount,
+    ERC20_ERC721 indexed _sellToken
+  );
+
+  event OrderExecutedP3(    
+    uint256 indexed _sellTokenIdOrAmount,
     address[] _feeRecipients,
     uint256[] _feeAmounts
   );
@@ -52,10 +55,10 @@ contract SmolPuddle is ReentrancyGuard, Pausable {
   );
 
   struct Order {
-    IERC721 nft;
-    uint256 tokenId;
-    IERC20 payment;
-    uint256 amount;
+    ERC20_ERC721 buyToken;
+    uint256 buyTokenIdOrAmount;
+    ERC20_ERC721 sellToken;
+    uint256 sellTokenIdOrAmount;
     address seller;
     uint256 expiration;
     bytes32 salt;
@@ -108,8 +111,8 @@ contract SmolPuddle is ReentrancyGuard, Pausable {
     // Switch order status to executed
     status[_order.seller][orderHash] = Status.Executed;
 
-    // Transfer ERC721 Token
-    _order.nft.transferFrom(_order.seller, msg.sender, _order.tokenId);
+    // Transfer the token purchased
+    _order.buyToken.safeTransferFrom(_order.seller, msg.sender, _order.buyTokenIdOrAmount);
 
     // If user sends ETH, then ETH will be converted to WETH.
     address from = msg.sender;
@@ -125,7 +128,7 @@ contract SmolPuddle is ReentrancyGuard, Pausable {
 
     // Transfer to fee recipients
     for (uint256 i = 0; i < feeRecipientsSize; i++) {
-      sellerAmount = sellerAmount.sub(_order.feeAmounts[i]);
+      sellerAmount -= _order.feeAmounts[i];
       _order.payment.safeTransferFrom(from, _order.feeRecipients[i], _order.feeAmounts[i]);
     }
 
@@ -134,14 +137,8 @@ contract SmolPuddle is ReentrancyGuard, Pausable {
 
     // Emit events
     emit OrderExecutedP1(orderHash, _order.seller, msg.sender);
-    emit OrderExecutedP2(
-      _order.nft,
-      _order.tokenId,
-      _order.payment,
-      _order.amount,
-      _order.feeRecipients,
-      _order.feeAmounts
-    );
+    emit OrderExecutedP2(_order.nft, _order.tokenId, _order.payment);
+    emit OrderExecutedP3(_order.amount, _order.feeRecipients, _order.feeAmounts);
 
     // All done!
     return true;
