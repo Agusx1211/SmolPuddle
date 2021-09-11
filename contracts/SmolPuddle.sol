@@ -28,6 +28,26 @@ contract SmolPuddle is ReentrancyGuard, Pausable {
     weth = _weth;
   }
 
+  event OrderExecutedP1(
+    bytes32 indexed _order,
+    address indexed _seller,
+    address indexed _buyer
+  );
+
+  event OrderExecutedP2(
+    IERC721 indexed _token,
+    uint256 indexed _id,
+    IERC20 _payment,
+    uint256 _amount,
+    address[] _feeRecipients,
+    uint256[] _feeAmounts
+  );
+
+  event OrderCanceled(
+    bytes32 indexed _order,
+    address indexed _seller
+  );
+
   error OrderExpired();
   error InalidSignature();
   error NotEnoughETH();
@@ -40,6 +60,7 @@ contract SmolPuddle is ReentrancyGuard, Pausable {
     }
 
     status[msg.sender][_hash] = Status.Canceled;
+    emit OrderCanceled(_hash, msg.sender);
   }
 
   function swap(
@@ -80,6 +101,22 @@ contract SmolPuddle is ReentrancyGuard, Pausable {
       )
     );
 
+    // Emit events
+    emit OrderExecutedP1(
+      orderHash,
+      _seller,
+      msg.sender
+    );
+
+    emit OrderExecutedP2(
+      _nft,
+      _tokenId,
+      _payment,
+      _amount,
+      _feeRecipients,
+      _feeAmounts
+    );
+
     // Check if order is canceled or executed
     if (status[_seller][orderHash] != Status.Open) {
       revert OrderNotOpen();
@@ -102,7 +139,7 @@ contract SmolPuddle is ReentrancyGuard, Pausable {
     if (payment == weth) {
       if (msg.value != _amount) {
         revert NotEnoughETH();
-      } 
+      }
 
       weth.deposit{ value: msg.value }();
     }
