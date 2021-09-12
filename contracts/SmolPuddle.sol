@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 import "./SafeERC20ERC721.sol";
+import "./EIP712Order.sol";
 
 enum Status {
   Open,
@@ -12,23 +13,17 @@ enum Status {
   Canceled
 }
 
-enum OrderType {
-  NftToNft,
-  BuyNFT,
-  SellNFT
-}
-
 interface WETH is ERC20_ERC721 {
   function deposit() external payable;
 }
 
-contract SmolPuddle is ReentrancyGuard, Ownable {
+contract SmolPuddle is ReentrancyGuard, Ownable, EIP712Order {
   using SafeERC20ERC721 for ERC20_ERC721;
 
   mapping(address => mapping(bytes32 => Status)) public status;
   WETH public immutable weth;
 
-  constructor(WETH _weth) {
+  constructor(WETH _weth, uint256 _chainID) EIP712Order(_chainID) {
     weth = _weth;
   }
 
@@ -41,12 +36,12 @@ contract SmolPuddle is ReentrancyGuard, Ownable {
 
   event OrderExecutedP2(
     OrderType indexed orderType,
-    ERC20_ERC721 indexed buyToken,
+    address indexed buyToken,
     uint256 indexed buyTokenIdOrAmount
   );
 
   event OrderExecutedP3(    
-    ERC20_ERC721 indexed sellToken,
+    address indexed sellToken,
     uint256 indexed sellTokenIdOrAmount,
     address[] feeRecipients,
     uint256[] feeAmounts
@@ -58,25 +53,13 @@ contract SmolPuddle is ReentrancyGuard, Ownable {
 
   );
 
-  struct Order {
-    address seller;              // Seller's address
-    OrderType orderType;         // Indicates which order this is (Nft -> NFT, token -> NFT or NFT -> token)
-    ERC20_ERC721 askToken;       // Token seller is requesting
-    ERC20_ERC721 sellToken;      // Token address that is being sold
-    uint256 askTokenIdOrAmount;  // ID or amount seller is requesting
-    uint256 sellTokenIdOrAmount; // Id or amount seller is selling
-    address[] feeRecipients;     // Array of who will receive fee for the trade
-    uint256[] feeAmounts;        // Amount to be sent for respective fee recipient
-    uint256 expiration;          // When the order expires
-    bytes32 salt;                // Salt to prevent hash collision 
-  }
-
   // Errors
   error OrderExpired();
   error InvalidSignature();
   error InvalidArrays();
   error OrderNotOpen();
   error InvalidPayment();
+  error InvalidOrderType();
 
   /**
    * @notice Will cancel a given order
@@ -103,7 +86,7 @@ contract SmolPuddle is ReentrancyGuard, Ownable {
     }
 
     // Compute order hash
-    bytes32 orderHash = keccak256(abi.encode(address(this), block.chainid, _order));
+    bytes32 orderHash = EIP712Order.hash(_order);
 
     // Check user signature
     if (!SignatureChecker.isValidSignatureNow(_order.seller, orderHash, _signature)) {
@@ -124,7 +107,7 @@ contract SmolPuddle is ReentrancyGuard, Ownable {
       address currencySender = msg.sender;
 
       // If buyer sends ETH, then ETH will be converted to WETH and send from this contract.
-      if (_order.askToken == weth && msg.value == _order.askTokenIdOrAmount) {
+      if (_order.askToken == address(weth) && msg.value == _order.askTokenIdOrAmount) {
         weth.deposit{ value: _order.askTokenIdOrAmount }();
         currencySender = address(this);
       } else if (msg.value > 0) {
@@ -135,22 +118,24 @@ contract SmolPuddle is ReentrancyGuard, Ownable {
       // Execute all transfers
       uint256 totalFeePaid = _feePayment(_order.askToken, currencySender, _order.feeRecipients, _order.feeAmounts);
       uint256 revenueForNFT = _order.askTokenIdOrAmount - totalFeePaid;                         // Amount of currency NFT owner will receive after fee
-      _order.askToken.safeTransferFrom(currencySender, _order.seller, revenueForNFT);           // Sending currency to seller
-      _order.sellToken.safeTransferFrom(_order.seller, msg.sender, _order.sellTokenIdOrAmount); // Sending NFT to buyer
+      ERC20_ERC721(_order.askToken).safeTransferFrom(currencySender, _order.seller, revenueForNFT);           // Sending currency to seller
+      ERC20_ERC721(_order.sellToken).safeTransferFrom(_order.seller, msg.sender, _order.sellTokenIdOrAmount); // Sending NFT to buyer
 
     // NFT to currency trade (i.e. filling an NFT buy order)
     } else if (_order.orderType == OrderType.BuyNFT)  {
       // Execute all transfers
       uint256 totalFeePaid = _feePayment(_order.sellToken, _order.seller, _order.feeRecipients, _order.feeAmounts);
       uint256 revenueForNFT = _order.sellTokenIdOrAmount - totalFeePaid;                      // Amount of currency NFT owner will receive after fee
-      _order.sellToken.safeTransferFrom(_order.seller, msg.sender, revenueForNFT);            // Sending currency to NFT seller
-      _order.askToken.safeTransferFrom(msg.sender, _order.seller, _order.askTokenIdOrAmount); // Sending NFT to who made an offer
+      ERC20_ERC721(_order.sellToken).safeTransferFrom(_order.seller, msg.sender, revenueForNFT);            // Sending currency to NFT seller
+      ERC20_ERC721(_order.askToken).safeTransferFrom(msg.sender, _order.seller, _order.askTokenIdOrAmount); // Sending NFT to who made an offer
 
     // NFT to NFT trade
     } else if (_order.orderType == OrderType.NftToNft) {
       if (msg.value > 0) { revert InvalidPayment(); }
-      _order.askToken.safeTransferFrom(msg.sender, _order.seller, _order.askTokenIdOrAmount);
-      _order.sellToken.safeTransferFrom(_order.seller, msg.sender, _order.sellTokenIdOrAmount);
+      ERC20_ERC721(_order.askToken).safeTransferFrom(msg.sender, _order.seller, _order.askTokenIdOrAmount);
+      ERC20_ERC721(_order.sellToken).safeTransferFrom(_order.seller, msg.sender, _order.sellTokenIdOrAmount);
+    } else {
+      revert InvalidOrderType();
     }
 
     // Emit events
@@ -170,7 +155,7 @@ contract SmolPuddle is ReentrancyGuard, Ownable {
    * @param _feeAmounts    Array of amount of fees to pay to each corresponding fee recipient
    * @return totalFeeAmount Total amount of fee paid
    */
-  function _feePayment(ERC20_ERC721 _currency, address _from, address[] memory _feeRecipients, uint256[] memory _feeAmounts) private returns (uint256 totalFeeAmount) {
+  function _feePayment(address _currency, address _from, address[] memory _feeRecipients, uint256[] memory _feeAmounts) private returns (uint256 totalFeeAmount) {
     // Sanity check inputs
     if (_feeRecipients.length != _feeAmounts.length) {
       revert InvalidArrays();
@@ -179,7 +164,7 @@ contract SmolPuddle is ReentrancyGuard, Ownable {
     // Transfer to fee recipients
     for (uint256 i = 0; i < _feeRecipients.length; i++) {
       totalFeeAmount -= _feeAmounts[i];
-      _currency.safeTransferFrom(_from, _feeRecipients[i], _feeAmounts[i]);
+      ERC20_ERC721(_currency).safeTransferFrom(_from, _feeRecipients[i], _feeAmounts[i]);
     }
 
     return totalFeeAmount;
@@ -188,8 +173,9 @@ contract SmolPuddle is ReentrancyGuard, Ownable {
   /**
    * @notice Will self-destruct the contract
    * @dev This will be used if a vulnerability is discovered to halt an attacker
+   * @param _recipient Address that will receive stuck ETH, if any
    */
-  function NUKE() external onlyOwner {
-    selfdestruct(payable(owner()));
+  function NUKE(address payable _recipient) external onlyOwner {
+    selfdestruct(_recipient);
   }
 }
