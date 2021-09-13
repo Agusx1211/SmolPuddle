@@ -80,7 +80,7 @@ contract SmolPuddle is ReentrancyGuard, Ownable, EIP712Order {
    * @param _order     Order to fill
    * @param _signature Signature associated with given order
    */
-  function swap(Order memory _order, bytes memory _signature) public payable nonReentrant returns (bool) {
+  function swap(Order calldata _order, bytes calldata _signature) external payable nonReentrant returns (bool) {
     // Must not be expired
     if (block.timestamp > _order.expiration) {
       revert OrderExpired();
