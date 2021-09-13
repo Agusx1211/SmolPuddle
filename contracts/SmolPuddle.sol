@@ -3,9 +3,10 @@ pragma solidity ^0.8.4;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
+import "./utils/SignatureValidator.sol";
 import "./SafeERC20ERC721.sol";
 import "./EIP712Order.sol";
+
 
 enum Status {
   Open,
@@ -89,7 +90,7 @@ contract SmolPuddle is ReentrancyGuard, Ownable, EIP712Order {
     bytes32 orderHash = EIP712Order.hash(_order);
 
     // Check user signature
-    if (!SignatureChecker.isValidSignatureNow(_order.seller, orderHash, _signature)) {
+    if (!SignatureValidator.isValidSignature(_order.seller, orderHash, abi.encode(_order), _signature)) {
       revert InvalidSignature();
     }
 
