@@ -69,12 +69,6 @@ library SignatureValidator {
     uint8 signatureTypeRaw = uint8(_rsig.lastByte());
     bytes memory sig = _rsig[0:_rsig.length - 1];
 
-    // Ensure signature is supported
-    require(
-      signatureTypeRaw < uint8(SignatureType.NSignatureTypes),
-      "SignatureValidator#isValidSignature: UNSUPPORTED_SIGNATURE"
-    );
-
     // Extract signature type
     SignatureType signatureType = SignatureType(signatureTypeRaw);
 
@@ -95,10 +89,6 @@ library SignatureValidator {
 
     // Signature using EIP712
     } else if (signatureType == SignatureType.EIP712) {
-      require(
-        sig.length == 97,
-        "SignatureValidator#isValidSignature: LENGTH_97_REQUIRED"
-      );
       r = sig.readBytes32(0);
       s = sig.readBytes32(32);
       v = uint8(sig[64]);
@@ -109,10 +99,6 @@ library SignatureValidator {
 
     // Signed using web3.eth_sign() or Ethers wallet.signMessage()
     } else if (signatureType == SignatureType.EthSign) {
-      require(
-        sig.length == 97,
-        "SignatureValidator#isValidSignature: LENGTH_97_REQUIRED"
-      );
       r = sig.readBytes32(0);
       s = sig.readBytes32(32);
       v = uint8(sig[64]);
