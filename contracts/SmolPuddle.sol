@@ -90,7 +90,7 @@ contract SmolPuddle is ReentrancyGuard, Ownable, EIP712Order {
     bytes32 orderHash = EIP712Order.hash(_order);
 
     // Check user signature
-    if (!SignatureValidator.isValidSignature(_order.seller, orderHash, abi.encode(_order), _signature)) {
+    if (!SignatureValidator.isValidSignature(_order.seller, orderHash, _signature)) {
       revert InvalidSignature();
     }
 

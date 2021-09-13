@@ -41,7 +41,6 @@ library SignatureValidator {
    * @dev Verifies that a hash has been signed by the given signer.
    * @param _signerAddress  Address that should have signed the given hash.
    * @param _hash           Hash of the EIP-712 encoded data
-   * @param _data           Full EIP-712 data structure that was hashed and signed
    * @param _sig            Proof that the hash has been signed by signer.
    *      For non wallet signatures, _sig is expected to be an array tightly encoded as
    *      (bytes32 r, bytes32 s, uint8 v, uint256 nonce, SignatureType sigType)
@@ -50,7 +49,6 @@ library SignatureValidator {
   function isValidSignature(
     address _signerAddress,
     bytes32 _hash,
-    bytes memory _data,
     bytes memory _sig
   )
     public
@@ -125,13 +123,6 @@ library SignatureValidator {
       );
       isValid = _signerAddress == recovered;
       return isValid;
-
-
-    // Signature verified by wallet contract with data validation.
-    } else if (signatureType == SignatureType.WalletBytes) {
-      isValid = ERC1271_MAGICVALUE == IERC1271Wallet(_signerAddress).isValidSignature(_data, _sig);
-      return isValid;
-
 
     // Signature verified by wallet contract without data validation.
     } else if (signatureType == SignatureType.WalletBytes32) {
