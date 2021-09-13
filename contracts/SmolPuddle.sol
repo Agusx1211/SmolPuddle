@@ -18,7 +18,7 @@ interface WETH is ERC20_ERC721 {
   function deposit() external payable;
 }
 
-contract SmolPuddle is ReentrancyGuard, Ownable, EIP712Order {
+contract SmolPuddle is SignatureValidator, ReentrancyGuard, Ownable, EIP712Order {
   using SafeERC20ERC721 for ERC20_ERC721;
 
   mapping(address => mapping(bytes32 => Status)) public status;
@@ -90,7 +90,7 @@ contract SmolPuddle is ReentrancyGuard, Ownable, EIP712Order {
     bytes32 orderHash = EIP712Order.hash(_order);
 
     // Check user signature
-    if (!SignatureValidator.isValidSignature(_order.seller, orderHash, _signature)) {
+    if (!isValidSignature(_order.seller, orderHash, _signature)) {
       revert InvalidSignature();
     }
 
