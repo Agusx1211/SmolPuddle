@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/utils/Address.sol";
 
 interface ERC20_ERC721 {
   function transferFrom(address from, address to, uint256 idOrAmount) external;
+  function transfer(address to, uint256 idOrAmount) external;
 }
 
 /**
@@ -19,12 +20,34 @@ interface ERC20_ERC721 {
 library SafeERC20ERC721 {
     using Address for address;
 
+    // Uses tranfer() method if sender is this contract for the wETH flow
     function safeTransferFrom(
         ERC20_ERC721 token,
         address from,
         address to,
         uint256 value
     ) internal {
+        if (from == address(this)) {
+          _safeTransfer(token, to, value);
+        } else {
+          _safeTransferFrom(token, from, to, value);
+        }
+    }
+
+    function _safeTransfer(
+        ERC20_ERC721 token,
+        address to,
+        uint256 value
+    ) private {
+        _callOptionalReturn(token, abi.encodeWithSelector(token.transfer.selector, to, value));
+    }
+
+    function _safeTransferFrom(
+        ERC20_ERC721 token,
+        address from,
+        address to,
+        uint256 value
+    ) private {
         _callOptionalReturn(token, abi.encodeWithSelector(token.transferFrom.selector, from, to, value));
     }
 
