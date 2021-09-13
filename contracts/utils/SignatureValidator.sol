@@ -9,7 +9,7 @@ import "./LibBytes.sol";
  * Signatures from wallet contracts assume ERC-1271 support (https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1271.md)
  * Notes: Methods are strongly inspired by contracts in https://github.com/0xProject/0x-monorepo/blob/development/
  */
-library SignatureValidator {
+contract SignatureValidator {
   using LibBytes for bytes;
 
   /***********************************|
@@ -39,9 +39,9 @@ library SignatureValidator {
 
   /**
    * @dev Verifies that a hash has been signed by the given signer.
-   * @param _signerAddress  Address that should have signed the given hash.
-   * @param _hash           Hash of the EIP-712 encoded data
-   * @param _sig            Proof that the hash has been signed by signer.
+   * @param _signerAddress   Address that should have signed the given hash.
+   * @param _hash            Hash of the EIP-712 encoded data
+   * @param _rsig            Proof that the hash has been signed by signer.
    *      For non wallet signatures, _sig is expected to be an array tightly encoded as
    *      (bytes32 r, bytes32 s, uint8 v, uint256 nonce, SignatureType sigType)
    * @return isValid True if the address recovered from the provided signature matches the input signer address.
@@ -49,14 +49,14 @@ library SignatureValidator {
   function isValidSignature(
     address _signerAddress,
     bytes32 _hash,
-    bytes memory _sig
+    bytes calldata _rsig
   )
     public
     view
     returns (bool isValid)
   {
     require(
-      _sig.length > 0,
+      _rsig.length > 0,
       "SignatureValidator#isValidSignature: LENGTH_GREATER_THAN_0_REQUIRED"
     );
 
@@ -66,13 +66,8 @@ library SignatureValidator {
     );
 
     // Pop last byte off of signature byte array.
-    uint8 signatureTypeRaw = uint8(_sig.popLastByte());
-
-    // Ensure signature is supported
-    require(
-      signatureTypeRaw < uint8(SignatureType.NSignatureTypes),
-      "SignatureValidator#isValidSignature: UNSUPPORTED_SIGNATURE"
-    );
+    uint8 signatureTypeRaw = uint8(_rsig.lastByte());
+    bytes memory sig = _rsig[0:_rsig.length - 1];
 
     // Extract signature type
     SignatureType signatureType = SignatureType(signatureTypeRaw);
@@ -94,13 +89,9 @@ library SignatureValidator {
 
     // Signature using EIP712
     } else if (signatureType == SignatureType.EIP712) {
-      require(
-        _sig.length == 97,
-        "SignatureValidator#isValidSignature: LENGTH_97_REQUIRED"
-      );
-      r = _sig.readBytes32(0);
-      s = _sig.readBytes32(32);
-      v = uint8(_sig[64]);
+      r = sig.readBytes32(0);
+      s = sig.readBytes32(32);
+      v = uint8(sig[64]);
       recovered = ecrecover(_hash, v, r, s);
       isValid = _signerAddress == recovered;
       return isValid;
@@ -108,13 +99,9 @@ library SignatureValidator {
 
     // Signed using web3.eth_sign() or Ethers wallet.signMessage()
     } else if (signatureType == SignatureType.EthSign) {
-      require(
-        _sig.length == 97,
-        "SignatureValidator#isValidSignature: LENGTH_97_REQUIRED"
-      );
-      r = _sig.readBytes32(0);
-      s = _sig.readBytes32(32);
-      v = uint8(_sig[64]);
+      r = sig.readBytes32(0);
+      s = sig.readBytes32(32);
+      v = uint8(sig[64]);
       recovered = ecrecover(
         keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", _hash)),
         v,
@@ -126,7 +113,7 @@ library SignatureValidator {
 
     // Signature verified by wallet contract without data validation.
     } else if (signatureType == SignatureType.WalletBytes32) {
-      isValid = ERC1271_MAGICVALUE_BYTES32 == IERC1271Wallet(_signerAddress).isValidSignature(_hash, _sig);
+      isValid = ERC1271_MAGICVALUE_BYTES32 == IERC1271Wallet(_signerAddress).isValidSignature(_hash, sig);
       return isValid;
     }
 
